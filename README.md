@@ -240,6 +240,7 @@ Every catalog provider has a BYOK credential variable:
 | Hopper | `SPEKO_HOPPER_BYOK_API_KEY` | API key (`sk_hopper_…`), sent as a bearer; BYOK/Relay only because Hopper has no token exchange |
 | Hume | `SPEKO_HUME_BYOK_API_KEY` | API key |
 | Inworld | `SPEKO_INWORLD_BYOK_API_KEY` | Base64 portal credential (`key:secret`) |
+| Kalpa | `SPEKO_KALPA_BYOK_API_KEY` | API key, sent in the socket's first message; BYOK/Relay only because Kalpa has no token exchange |
 | Maya Research | `SPEKO_MAYA_BYOK_API_KEY` | Permanent API key; BYOK/Relay only because Maya has no short-lived session token |
 | Meta | `SPEKO_META_BYOK_API_KEY` | API key; sent as the bearer inside the realtime handshake frame |
 | MiniMax | `SPEKO_MINIMAX_BYOK_API_KEY` | API key |
@@ -337,6 +338,7 @@ restarting the Gateway.
 | TTS | Munsit | `munsit.tts.v1` | `faseeh-v1-preview` |
 | STT | Hopper | `hopper.stt.v1` | `nemotron-asr` |
 | TTS | Hopper | `hopper.tts.v1` | `qwen3-tts` |
+| TTS | Kalpa | `kalpa.tts.v1` | `kalpa-tts-1` |
 
 Provider endpoints are checked against exact official host allowlists before
 credentials are attached. Production connections require TLS and port 443.

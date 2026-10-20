@@ -198,6 +198,9 @@ var providerCatalog = []CatalogEntry{
 	// streams 24 kHz PCM and refuses requests without a voice.
 	{Provider: "hopper", Kind: protocol.SessionKindSTT, Adapter: "hopper.stt.v1", DefaultModel: "nemotron-asr", Transport: protocol.TransportWebSocket, Endpoint: "wss://api.withhopper.com/stt/websocket"},
 	{Provider: "hopper", Kind: protocol.SessionKindTTS, Adapter: "hopper.tts.v1", DefaultModel: "qwen3-tts", DefaultVoice: "elena", Transport: protocol.TransportHTTP, Endpoint: "https://api.withhopper.com/v1/audio/speech"},
+	// Kalpa: kalpa-tts-1 (English and Hindi) on the per-voice streaming
+	// socket; the adapter appends /{voice_id}/stream to this base.
+	{Provider: "kalpa", Kind: protocol.SessionKindTTS, Adapter: "kalpa.tts.v1", DefaultModel: "kalpa-tts-1", DefaultVoice: "18c26f49-9f9c-400c-bec9-7467f28e1db5", Transport: protocol.TransportWebSocket, Endpoint: "wss://api.kalpalabs.ai/v1/tts"},
 	{Provider: "speechmatics", Kind: protocol.SessionKindSTT, Adapter: "speechmatics.stt.v1", DefaultModel: "standard", Models: []string{"standard", "enhanced"}, Transport: protocol.TransportWebSocket, Endpoint: "wss://global.rt.speechmatics.com/v2/"},
 }
 
