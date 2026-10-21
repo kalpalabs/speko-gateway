@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -557,6 +560,112 @@ func TestKeepAliveSendsEmptyTextWhenQuiet(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("no keepalive on a quiet socket")
 	}
+}
+
+// TestStalledKeepAliveDoesNotBlockCommands: a command issued while a
+// keepalive is parked on a socket that stopped accepting writes must honour
+// its own context instead of waiting behind the keepalive.
+func TestStalledKeepAliveDoesNotBlockCommands(t *testing.T) {
+	t.Parallel()
+	stream, socket := stalledSession(t, 20*time.Millisecond)
+	socket.stalled.Store(true)
+	select {
+	case <-socket.parked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("keepalive never wrote")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- stream.AppendText(ctx, "hello") }()
+	select {
+	case err := <-done:
+		var providerError *runtimepkg.ProviderError
+		if !errors.As(err, &providerError) || !errors.Is(providerError.Cause, context.DeadlineExceeded) {
+			t.Fatalf("AppendText error = %v, want its own deadline", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("AppendText blocked behind the stalled keepalive")
+	}
+}
+
+// TestCloseOnAStalledSocket: the runtime closes with no deadline, so Close's
+// cancel of uncommitted text must not park on a socket that stopped
+// accepting writes.
+func TestCloseOnAStalledSocket(t *testing.T) {
+	t.Parallel()
+	stream, socket := stalledSession(t, time.Hour)
+	if err := stream.AppendText(context.Background(), "uncommitted"); err != nil {
+		t.Fatal(err)
+	}
+	socket.stalled.Store(true)
+	done := make(chan error, 1)
+	go func() { done <- stream.Close(context.Background()) }()
+	select {
+	case err := <-done:
+		assertProviderError(t, err, "provider_unavailable", true)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close parked on the stalled socket")
+	}
+}
+
+// stallConn is the client's side of the socket. While stalled, every Write
+// parks until Close, like a connection whose peer stopped reading.
+type stallConn struct {
+	net.Conn
+	stalled   atomic.Bool
+	parked    chan struct{}
+	parkOnce  sync.Once
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func (c *stallConn) Write(p []byte) (int, error) {
+	if c.stalled.Load() {
+		c.parkOnce.Do(func() { close(c.parked) })
+		<-c.closed
+		return 0, net.ErrClosed
+	}
+	return c.Conn.Write(p)
+}
+
+func (c *stallConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+// stalledSession opens a stream whose socket can be made to stop accepting
+// writes, against a server that keeps reading.
+func stalledSession(t *testing.T, keepAlive time.Duration) (runtimepkg.ProviderStream, *stallConn) {
+	t.Helper()
+	server := newSocketServer(t, func(ctx context.Context, conn *websocket.Conn) {
+		handshakeOK(ctx, t, conn, 24_000)
+		for {
+			if _, _, err := conn.Read(ctx); err != nil {
+				return
+			}
+		}
+	})
+	t.Cleanup(server.Close)
+	socket := &stallConn{parked: make(chan struct{}), closed: make(chan struct{})}
+	config := ttsConfig(server.URL)
+	config.HTTPClient = &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		socket.Conn = conn
+		return socket, err
+	}}}
+	config.KeepAliveInterval = keepAlive
+	config.GracefulCloseIdleTimeout = 200 * time.Millisecond
+	adapter, err := NewTTS(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := adapter.Open(context.Background(), ttsRequest(server.URL, 24_000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stream.(*ttsStream).abort() })
+	return stream, socket
 }
 
 func openStream(t *testing.T, serverURL string, rate int) runtimepkg.ProviderStream {

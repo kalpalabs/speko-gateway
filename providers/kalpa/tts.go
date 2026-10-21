@@ -37,6 +37,9 @@ const (
 	defaultHandshakeTimeout  = 10 * time.Second
 	defaultKeepAliveInterval = 60 * time.Second
 	defaultCloseIdleTimeout  = 30 * time.Second
+	// keepAliveWriteTimeout bounds a keepalive write, so an upstream that has
+	// stopped reading fails the session instead of stalling it.
+	keepAliveWriteTimeout = 10 * time.Second
 )
 
 var (
@@ -57,10 +60,11 @@ type TTSConfig struct {
 	// HandshakeTimeout bounds the wait for sessionCreated after
 	// initializeConnection.
 	HandshakeTimeout time.Duration
-	// KeepAliveInterval is how long the socket may carry no client message
-	// before an empty sendText keeps it open. Kalpa closes a socket that
-	// receives no client message for several minutes; WebSocket pings do not
-	// count.
+	// KeepAliveInterval is how often the adapter checks for a quiet socket. A
+	// check that finds no client message for a whole interval sends an empty
+	// sendText, so the socket is never quiet for more than twice the interval.
+	// Kalpa closes a socket that receives no client message for several
+	// minutes; WebSocket pings do not count.
 	KeepAliveInterval time.Duration
 	// GracefulCloseIdleTimeout bounds how long Close waits without progress
 	// for a committed utterance to finish.
@@ -191,8 +195,9 @@ func (a *TTSAdapter) Open(ctx context.Context, request runtimepkg.AdapterRequest
 	stream := &ttsStream{
 		conn: conn, ctx: streamCtx, cancel: cancel, events: make(chan runtimepkg.ProviderEvent, a.eventBuffer),
 		model: created.Model, sessionID: created.SessionID, closeIdleTimeout: a.closeIdleTimeout,
-		progress: make(chan struct{}, 1), readDone: make(chan struct{}), lastWrite: time.Now(),
+		progress: make(chan struct{}, 1), readDone: make(chan struct{}),
 	}
+	stream.lastWrite.Store(time.Now().UnixNano())
 	stream.events <- runtimepkg.ProviderEvent{Type: protocol.EventUsageObserved, Data: requestData(created.SessionID), Extensions: extension(raw)}
 	go stream.readLoop()
 	go stream.keepAlive(a.keepAlive)
@@ -269,8 +274,10 @@ type ttsStream struct {
 	progress         chan struct{}
 	readDone         chan struct{}
 
-	writeMu   sync.Mutex
-	lastWrite time.Time
+	// lastWrite is the UnixNano time of the last client message. Writes need
+	// no lock of their own: the websocket serializes them, and a write blocked
+	// on a stalled socket stays cancellable through its context.
+	lastWrite atomic.Int64
 	closeOnce sync.Once
 	abortOnce sync.Once
 	closed    atomic.Bool
@@ -378,7 +385,11 @@ func (s *ttsStream) Close(ctx context.Context) error {
 		s.stateMu.Unlock()
 		var err error
 		if uncommitted {
-			err = s.Cancel(ctx)
+			// The runtime closes with no deadline; a socket that stopped
+			// accepting writes must not park Close.
+			cancelCtx, cancel := context.WithTimeout(ctx, s.closeIdleTimeout)
+			err = s.Cancel(cancelCtx)
+			cancel()
 		}
 		if err == nil {
 			err = s.drain(ctx)
@@ -468,12 +479,16 @@ func (s *ttsStream) keepAlive(interval time.Duration) {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			s.writeMu.Lock()
-			idle := time.Since(s.lastWrite) >= interval
-			s.writeMu.Unlock()
-			if idle && s.writeJSON(s.ctx, sendText{Type: "sendText"}) != nil {
-				return
+			if time.Since(time.Unix(0, s.lastWrite.Load())) < interval {
+				continue
 			}
+			// A failed keepalive needs no handling here: a write that timed out
+			// mid-frame closed the socket, which ends the read loop and this
+			// goroutine, and one that only waited behind a command's write
+			// leaves a socket that may still recover.
+			ctx, cancel := context.WithTimeout(s.ctx, keepAliveWriteTimeout)
+			_ = s.writeJSON(ctx, sendText{Type: "sendText"})
+			cancel()
 		}
 	}
 }
@@ -482,15 +497,10 @@ func (s *ttsStream) writeJSON(ctx context.Context, value any) error {
 	if s.closed.Load() {
 		return runtimepkg.ErrSessionClosed
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if s.closed.Load() {
-		return runtimepkg.ErrSessionClosed
-	}
 	if err := writeJSON(ctx, s.conn, value); err != nil {
 		return &runtimepkg.ProviderError{Code: "provider_unavailable", Message: "Kalpa TTS write failed", Retryable: true, Cause: err}
 	}
-	s.lastWrite = time.Now()
+	s.lastWrite.Store(time.Now().UnixNano())
 	return nil
 }
 
@@ -588,15 +598,11 @@ func (s *ttsStream) handleMessage(payload []byte) error {
 	}
 }
 
+// handleAudio decodes before it checks the utterance, so the check sits right
+// before the emit. A Cancel that lands after the check can still see this one
+// frame delivered, like any frame already queued for the caller; the stopped
+// utterance's audio.done always follows all of its audio.
 func (s *ttsStream) handleAudio(message inbound) error {
-	s.stateMu.Lock()
-	active := s.current
-	if len(s.cancelled) > 0 || active == nil || active.responseID != message.ResponseID {
-		s.stateMu.Unlock()
-		return nil
-	}
-	s.stateMu.Unlock()
-
 	audio, err := base64.StdEncoding.DecodeString(message.PCM)
 	if err != nil {
 		return &runtimepkg.ProviderError{Code: "provider_unavailable", Message: "Kalpa TTS sent invalid audio data", Retryable: true, Cause: err}
@@ -605,6 +611,11 @@ func (s *ttsStream) handleAudio(message inbound) error {
 		return nil
 	}
 	s.stateMu.Lock()
+	active := s.current
+	if len(s.cancelled) > 0 || active == nil || active.responseID != message.ResponseID {
+		s.stateMu.Unlock()
+		return nil
+	}
 	started := !active.audioStarted
 	active.audioStarted = true
 	s.stateMu.Unlock()
