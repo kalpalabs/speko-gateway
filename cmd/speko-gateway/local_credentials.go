@@ -34,6 +34,7 @@ var localCredentialSpecs = []localCredentialSpec{
 	{Provider: "hopper", Env: "SPEKO_HOPPER_BYOK_API_KEY"},
 	{Provider: "hume", Env: "SPEKO_HUME_BYOK_API_KEY"},
 	{Provider: "inworld", Env: "SPEKO_INWORLD_BYOK_API_KEY"},
+	{Provider: "kalpa", Env: "SPEKO_KALPA_BYOK_API_KEY"},
 	{Provider: "maya", Env: "SPEKO_MAYA_BYOK_API_KEY"},
 	{Provider: "meta", Env: "SPEKO_META_BYOK_API_KEY"},
 	{Provider: "minimax", Env: "SPEKO_MINIMAX_BYOK_API_KEY"},

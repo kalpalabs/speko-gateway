@@ -311,6 +311,18 @@ numeric stream ID. They contain no audio, transcript, synthesis text
 or voice content. A socket that ends before the server's END reply, or a
 synthesis whose audio is cut off, leaves incomplete billing evidence.
 
+### Kalpa synthesis
+
+Kalpa takes the delegated key only inside the socket's first message
+(`initializeConnection`), never in the URL or a header, and has no token
+exchange, so no managed provider-direct credential exists. That message also
+carries the model, the output format and the sample rate; the voice is part of
+the validated URL path. Each utterance sends only its text. Billing
+observations carry the response ID, the session ID, the model, the mode and the
+generated audio duration Kalpa reports when a response completes. They contain
+no audio, synthesis text or voice content. A cancelled response leaves no
+billing evidence unless it had already completed.
+
 ### Soniox usage attribution
 
 Soniox realtime STT and TTS requests using relay or managed plans include

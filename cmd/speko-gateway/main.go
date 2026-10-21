@@ -35,6 +35,7 @@ import (
 	"github.com/SpekoAI/gateway/providers/hopper"
 	"github.com/SpekoAI/gateway/providers/hume"
 	"github.com/SpekoAI/gateway/providers/inworld"
+	"github.com/SpekoAI/gateway/providers/kalpa"
 	"github.com/SpekoAI/gateway/providers/maya"
 	"github.com/SpekoAI/gateway/providers/meta"
 	"github.com/SpekoAI/gateway/providers/minimax"
@@ -330,6 +331,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	kalpaTTSAdapter, err := kalpa.NewTTS(kalpa.TTSConfig{})
+	if err != nil {
+		return err
+	}
 	adapters := []runtimepkg.Adapter{
 		deepgramAdapter, deepgramTTSAdapter, elevenLabsAdapter, elevenLabsSTTAdapter,
 		fishAdapter,
@@ -342,7 +347,7 @@ func run() error {
 		palabraSTTAdapter, palabraTTSAdapter, mayaTTSAdapter, speechifyTTSAdapter, speechmaticsSTTAdapter,
 		geminiSTTAdapter, geminiTTSAdapter, metaSTTAdapter, nariSTTAdapter, nariTTSAdapter,
 		paxaTTSAdapter, munsitSTTAdapter, munsitTTSAdapter, hamsaTTSAdapter,
-		hopperSTTAdapter, hopperTTSAdapter,
+		hopperSTTAdapter, hopperTTSAdapter, kalpaTTSAdapter,
 	}
 	adapterIDs := make([]string, 0, len(adapters))
 	for _, adapter := range adapters {
