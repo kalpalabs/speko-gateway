@@ -363,10 +363,15 @@ func TestErrorsEndTheSession(t *testing.T) {
 		{"overloaded", func(ctx context.Context, conn *websocket.Conn) {
 			_ = writeJSON(ctx, conn, map[string]any{"type": "error", "fatal": false, "response_id": "resp_1", "error": map[string]any{"type": "overloaded", "message": "The model is temporarily overloaded."}})
 		}, "provider_unavailable", true},
-		{"context length", func(ctx context.Context, conn *websocket.Conn) {
+		{"text does not fit", func(ctx context.Context, conn *websocket.Conn) {
 			_ = writeJSON(ctx, conn, map[string]any{"type": "responseCreated", "response_id": "resp_1"})
 			_ = writeJSON(ctx, conn, map[string]any{"type": "error", "fatal": false, "response_id": "resp_1", "error": map[string]any{"type": "context_length_exceeded"}})
-		}, "input_too_large", false},
+		}, "context_length_exceeded", false},
+		{"model ran on after audio", func(ctx context.Context, conn *websocket.Conn) {
+			_ = writeJSON(ctx, conn, map[string]any{"type": "responseCreated", "response_id": "resp_1"})
+			_ = writeJSON(ctx, conn, audioFrame("resp_1", []byte{1, 0}))
+			_ = writeJSON(ctx, conn, map[string]any{"type": "error", "fatal": false, "response_id": "resp_1", "error": map[string]any{"type": "context_length_exceeded"}})
+		}, "context_length_exceeded", true},
 		{"server error close", func(ctx context.Context, conn *websocket.Conn) {
 			_ = conn.Close(websocket.StatusInternalError, "internal error")
 		}, "provider_unavailable", true},
@@ -497,7 +502,7 @@ func TestClassifiesKalpaErrors(t *testing.T) {
 	frames := map[string]string{
 		"authentication_error": "authentication_failed", "account_suspended": "authentication_failed",
 		"allowance_exhausted": "provider_quota_exceeded", "not_found": "invalid_request", "invalid_request": "invalid_request",
-		"context_length_exceeded": "input_too_large", "rate_limit_exceeded": "provider_rate_limited",
+		"context_length_exceeded": "context_length_exceeded", "rate_limit_exceeded": "provider_rate_limited",
 		"service_unavailable": "provider_unavailable", "overloaded": "provider_unavailable", "inference_error": "provider_unavailable",
 		"internal_error": "provider_unavailable",
 	}

@@ -588,11 +588,20 @@ func (s *ttsStream) handleMessage(payload []byte) error {
 		// cancel that already stopped it; only that work can be reporting.
 		s.stateMu.Lock()
 		stale := !message.Fatal && message.ResponseID != "" && len(s.cancelled) > 0
+		spoke := s.current != nil && s.current.audioStarted
 		s.stateMu.Unlock()
 		if stale {
 			return nil
 		}
-		return frameError(message, payload)
+		err := frameError(message, payload)
+		// Kalpa reports context_length_exceeded before any audio when the text
+		// and voice prompt do not fit, and after the audio when the model ran
+		// to the end of its context without stopping. Only the second is worth
+		// another take.
+		if err.Code == "context_length_exceeded" && spoke {
+			err.Retryable, err.Hint = true, "Retry the utterance; if it keeps happening, commit shorter utterances."
+		}
+		return err
 	default:
 		return nil
 	}

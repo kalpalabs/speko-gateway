@@ -47,9 +47,14 @@
 // The gateway does not retry inside a session, so every error frame ends the
 // session, including the response-scoped ones Kalpa's socket survives
 // (overloaded, inference_error). Those are marked retryable, so the client can
-// retry on a new session. context_length_exceeded maps to input_too_large.
-// The one exception is a response-scoped error that arrives while a cancel is
-// unacknowledged: it belongs to the work that cancel stopped and is dropped.
+// retry on a new session. The one exception is a response-scoped error that
+// arrives while a cancel is unacknowledged: it belongs to the work that cancel
+// stopped and is dropped.
+//
+// context_length_exceeded keeps its code. It is retryable once the utterance's
+// audio has started: the model ran to the end of its context without stopping,
+// and another take usually stops in time. Before any audio it is not
+// retryable, because the text and voice prompt did not fit.
 //
 // # Idle sockets
 //

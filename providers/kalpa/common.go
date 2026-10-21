@@ -133,7 +133,7 @@ func frameError(message inbound, raw []byte) *runtimepkg.ProviderError {
 	case "invalid_request":
 		err.Code, err.Retryable = "invalid_request", false
 	case "context_length_exceeded":
-		err.Code, err.Retryable, err.Hint = "input_too_large", false, "Commit shorter utterances."
+		err.Code, err.Retryable, err.Hint = "context_length_exceeded", false, "Commit shorter utterances."
 	case "rate_limit_exceeded":
 		err.Code = "provider_rate_limited"
 	}
